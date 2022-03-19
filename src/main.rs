@@ -15,9 +15,27 @@ fn editor_process_keypress(stdin: &mut StdinLock) -> EventLoopState {
     }
 }
 
-fn editor_refresh_screen(stdout: &mut RawTerminal<StdoutLock>) {
-    write!(stdout, "{}", termion::clear::All).unwrap();
+fn editor_draw_rows(stdout: &mut RawTerminal<StdoutLock>) {
+    let (xlen, ylen) = termion::terminal_size().unwrap();
     write!(stdout, "{}", termion::cursor::Goto(1,1)).unwrap();
+    for _ in 0..(ylen - 1) {
+        write!(stdout, "{}~\r\n", termion::clear::CurrentLine).unwrap();
+    }
+    write!(stdout, "{}~", termion::clear::CurrentLine).unwrap();
+    // TODO: StringBuilder like construct to create footer string 
+    const FOOTER_MSG: &str = "[kilo-rust -- version 0.0]";
+    let footer_start_x = (usize::from(xlen) - FOOTER_MSG.len()) / 2;
+    for _ in 1..footer_start_x {
+        write!(stdout, " ").unwrap();
+    }
+    write!(stdout, "{}", FOOTER_MSG).unwrap();
+}
+
+fn editor_refresh_screen(stdout: &mut RawTerminal<StdoutLock>) {
+    write!(stdout, "{}", termion::cursor::Hide).unwrap();
+    editor_draw_rows(stdout);
+    write!(stdout, "{}", termion::cursor::Goto(1,1)).unwrap();
+    write!(stdout, "{}", termion::cursor::Show).unwrap();
     stdout.flush().unwrap();
 }
 
