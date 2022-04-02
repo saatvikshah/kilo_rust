@@ -19,6 +19,43 @@ struct EditorState{
     col_offset: usize
 }
 
+impl EditorState {
+    pub fn key_up(self: &mut EditorState) {
+        let cursor = &mut self.cursor;
+        if cursor.at_top() && self.row_offset > 0 {
+            self.row_offset -= 1;
+        }
+        cursor.sub_y(1, &self.contents, self.row_offset, self.col_offset);
+    }
+
+    pub fn key_down(self: &mut EditorState) {
+        let cursor = &mut self.cursor;
+        if cursor.at_bottom() && (self.row_offset + (cursor.display_ymax() as usize)) < self.contents.len() {
+            self.row_offset += 1;
+        }
+        cursor.add_y(1, &self.contents, self.row_offset, self.col_offset);
+    }
+
+    pub fn key_left(self: &mut EditorState) {
+        let cursor = &mut self.cursor;        
+        if cursor.at_left() && self.col_offset > 0 {
+            self.col_offset -= 1;
+        }
+        cursor.sub_x(1);
+    }
+
+    pub fn key_right(self: &mut EditorState) {
+        let cursor = &mut self.cursor;
+        let curr_line = &self.contents[(cursor.display_y() - 1) as usize];
+        if curr_line.len() != (cursor.display_x() as usize) { // TODO: Fix
+            if cursor.at_right() && curr_line.len() > self.col_offset + (cursor.display_xmax() as usize) {
+                self.col_offset += 1;
+            }
+            cursor.add_x(1);
+        }
+    }
+}
+
 struct CursorState{
     x: u16,
     y: u16,
@@ -45,13 +82,15 @@ impl CursorState{
         self.x = self.x.saturating_sub(x_dec);
     }
 
-    pub fn add_y(self: &mut CursorState, y_inc: u16) {
+    pub fn add_y(self: &mut CursorState, y_inc: u16, contents: &[String], row_offset: usize, col_offset: usize) {
         let y_new = self.y.saturating_add(y_inc);
         self.y = y_new.min(self.y_max);
+        self.snap_x(contents, row_offset, col_offset);
     }
 
-    pub fn sub_y(self: &mut CursorState, y_dec: u16) {
+    pub fn sub_y(self: &mut CursorState, y_dec: u16, contents: &[String], row_offset: usize, col_offset: usize) {
         self.y = self.y.saturating_sub(y_dec);
+        self.snap_x(contents, row_offset, col_offset);
     }
 
     pub fn top(self: &mut CursorState) {
@@ -101,63 +140,40 @@ impl CursorState{
     pub fn at_right(self: &CursorState) -> bool {
         self.x == self.x_max
     }
+
+    pub fn snap_x(self: &mut CursorState, contents: &[String], row_offset: usize, col_offset: usize) {
+        let line_no = (self.y as usize) + row_offset;
+        self.x = self.x.min((contents[line_no].len() - col_offset) as u16);
+    }
 }
 
 fn editor_process_keypress(stdin: &mut StdinLock, editor: &mut EditorState) -> EventLoopState {
     let cursor = &mut editor.cursor;
     let in_key = stdin.keys().next().unwrap().unwrap();
+    if in_key == Key::Ctrl('w') {
+       return EventLoopState::Terminate;
+    }
     match in_key {
-        Key::Ctrl('w') => EventLoopState::Terminate,
-        Key::Up => {
-            if cursor.at_top() && editor.row_offset > 0 {
-                editor.row_offset -= 1;
-            }
-            cursor.sub_y(1);
-            EventLoopState::Running
-        },
-        Key::Down => {
-            if cursor.at_bottom() && (editor.row_offset + (cursor.display_ymax() as usize)) < editor.contents.len() {
-                editor.row_offset += 1;
-            }
-            cursor.add_y(1);
-            EventLoopState::Running
-        },
-        Key::Left => {
-            if cursor.at_left() && editor.col_offset > 0 {
-                editor.col_offset -= 1;
-            }
-            cursor.sub_x(1);
-            EventLoopState::Running
-        }
-        Key::Right => {
-            let curr_line = &editor.contents[(cursor.display_y() - 1) as usize];
-            if curr_line.len() == (cursor.display_x() as usize) {
-                return EventLoopState::Running;
-            }
-            if cursor.at_right() && curr_line.len() > editor.col_offset + (cursor.display_xmax() as usize) {
-                editor.col_offset += 1;
-            }
-            cursor.add_x(1);
-            EventLoopState::Running
-        }
+        Key::Up => editor.key_up(),
+        Key::Down => editor.key_down(),
+        Key::Left => editor.key_left(),
+        Key::Right => editor.key_right(),
         Key::PageUp => {
             cursor.top();
-            EventLoopState::Running
         }
         Key::PageDown => {
             cursor.bottom();
-            EventLoopState::Running
+
         },
         Key::Home => {
             cursor.left();
-            EventLoopState::Running
         }
         Key::End => {
             cursor.right();
-            EventLoopState::Running
         }
-        _ => EventLoopState::Running
+        _ => ()
     }
+    EventLoopState::Running
 }
 
 fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
