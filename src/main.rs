@@ -15,7 +15,8 @@ enum EventLoopState{
 struct EditorState{
     cursor: CursorState,
     contents: Vec<String>,
-    row_offset: usize
+    row_offset: usize,
+    col_offset: usize
 }
 
 struct CursorState{
@@ -92,6 +93,14 @@ impl CursorState{
     pub fn at_top(self: &CursorState) -> bool {
         self.y == 0
     }
+
+    pub fn at_left(self: &CursorState) -> bool {
+        self.x == 0
+    }
+
+    pub fn at_right(self: &CursorState) -> bool {
+        self.x == self.x_max
+    }
 }
 
 fn editor_process_keypress(stdin: &mut StdinLock, editor: &mut EditorState) -> EventLoopState {
@@ -114,10 +123,20 @@ fn editor_process_keypress(stdin: &mut StdinLock, editor: &mut EditorState) -> E
             EventLoopState::Running
         },
         Key::Left => {
+            if cursor.at_left() && editor.col_offset > 0 {
+                editor.col_offset -= 1;
+            }
             cursor.sub_x(1);
             EventLoopState::Running
         }
         Key::Right => {
+            let curr_line = &editor.contents[(cursor.display_y() - 1) as usize];
+            if curr_line.len() == (cursor.display_x() as usize) {
+                return EventLoopState::Running;
+            }
+            if cursor.at_right() && curr_line.len() > editor.col_offset + (cursor.display_xmax() as usize) {
+                editor.col_offset += 1;
+            }
             cursor.add_x(1);
             EventLoopState::Running
         }
@@ -154,9 +173,19 @@ fn editor_draw_rows(stdout: &mut RawTerminal<StdoutLock>, editor: &mut EditorSta
     
     let cursor = &editor.cursor;
     let drawable_rows = cursor.display_ymax() as usize;
+    let drawable_cols = cursor.display_xmax() as usize;
     let rows_from_file = editor.contents.len().min(drawable_rows);
     for row_file in 0..rows_from_file {
-        write!(stdout, "{}{}\r\n", termion::clear::CurrentLine, editor.contents[row_file + editor.row_offset]).unwrap();
+        let text_line = &editor.contents[row_file + editor.row_offset];
+        if text_line.len() > drawable_cols + editor.col_offset {
+            let start_offset = editor.col_offset;
+            let end_offset = drawable_cols + editor.col_offset;
+            write!(stdout, "{}{}\r\n", termion::clear::CurrentLine, &text_line[start_offset..end_offset]).unwrap();
+        } else {
+            let start_offset = editor.col_offset.min(text_line.len());
+            let end_offset = text_line.len();
+            write!(stdout, "{}{}\r\n", termion::clear::CurrentLine, &text_line[start_offset..end_offset]).unwrap();
+        }
     }
     for _ in rows_from_file..drawable_rows {
         write!(stdout, "{}~\r\n", termion::clear::CurrentLine).unwrap();
@@ -190,7 +219,9 @@ fn main() {
     let mut editor_state = EditorState{
         cursor: CursorState::new(xlen, ylen - 1),
         contents: lines_from_file(filename),
-        row_offset: 0};
+        row_offset: 0,
+        col_offset: 0
+    };
 
     let stdout = io::stdout();
     let mut stdout = stdout.lock().into_raw_mode().unwrap();
